@@ -11,57 +11,13 @@ NC='\033[0m' # No Color
 
 # Function to cleanup processes
 cleanup() {
-    echo -e "\n${BLUE}Initiating graceful shutdown...${NC}"
-    
-    if [ ! -z "$WORKER_PID" ]; then
-        echo -e "${YELLOW}Stopping worker process...${NC}"
-        kill -SIGTERM $WORKER_PID 2>/dev/null || true
-        
-        # Wait for graceful shutdown
-        for i in {1..5}; do
-            if ! kill -0 $WORKER_PID 2>/dev/null; then
-                echo -e "${GREEN}Worker stopped gracefully${NC}"
-                break
-            fi
-            sleep 1
-        done
-        
-        # Force kill if still running
-        if kill -0 $WORKER_PID 2>/dev/null; then
-            echo -e "${YELLOW}Force stopping worker...${NC}"
-            kill -9 $WORKER_PID 2>/dev/null || true
-        fi
-    fi
-
-    # Cleanup any remaining processes
-    pkill -f "ts-node src/worker" 2>/dev/null || true
-    
-    echo -e "${GREEN}Cleanup completed${NC}"
+    echo -e "\nCleaning up processes..."
+    pkill -f "node dist/workers/helloWorldWorker.js" 2>/dev/null || true
     exit 0
 }
 
-# Function to check worker startup
-check_worker() {
-    local pid=$1
-    local timeout=5
-    local count=0
-    
-    echo -e "${YELLOW}Waiting for worker initialization...${NC}"
-    while [ $count -lt $timeout ]; do
-        if ! kill -0 $pid 2>/dev/null; then
-            echo -e "\n${RED}✗ Worker failed to start${NC}"
-            return 1
-        fi
-        sleep 1
-        echo -n "."
-        count=$((count + 1))
-    done
-    echo -e "\n${GREEN}✓ Worker initialized${NC}"
-    return 0
-}
-
 # Set up trap for Ctrl+C (SIGINT) and SIGTERM
-trap cleanup SIGINT SIGTERM EXIT
+trap cleanup SIGINT SIGTERM
 
 # Function to check if a port is open
 check_port() {
@@ -76,7 +32,7 @@ check_port() {
         if [ $? -eq 0 ]; then
             return 0
         fi
-        echo -e "${YELLOW}Attempt $((count + 1))/$retries: Waiting for $host:$port...${NC}"
+        echo "Attempt $((count + 1))/$retries: Waiting for $host:$port..."
         sleep $wait_time
         count=$((count + 1))
     done
@@ -107,80 +63,63 @@ if ! command -v npm &> /dev/null; then
 fi
 
 # OpenTelemetry Configuration
-export OTEL_EXPORTER_OTLP_PROTOCOL="grpc"
-export OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317"
-export OTEL_RESOURCE_ATTRIBUTES="service.name=temporal-hello-world,deployment.environment=development"
-export OTEL_TRACES_SAMPLER="always_on"
-export OTEL_METRICS_EXPORTER="otlp"
-export OTEL_LOGS_EXPORTER="otlp"
-export OTEL_PROPAGATORS="tracecontext,baggage"
-export OTEL_SERVICE_NAME="temporal-hello-world"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:4317"
+export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT="http://localhost:4317"
+export OTEL_RESOURCE_ATTRIBUTES="service.name=temporal-hello-world,environment=development"
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_TRACES_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=none
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_HEADERS="signoz-access-token=1234567890"
+export OTEL_LOG_LEVEL="debug"
 
-# If SigNoz ingestion key is provided, set it
-if [ ! -z "$SIGNOZ_INGESTION_KEY" ]; then
-    export OTEL_EXPORTER_OTLP_HEADERS="signoz-ingestion-key=$SIGNOZ_INGESTION_KEY"
-    echo -e "${GREEN}✓ Using SigNoz with provided ingestion key${NC}"
-fi
+echo -e "${BLUE}Starting application...${NC}"
 
-# Check Temporal Server (only for local development)
-if ! is_temporal_cloud; then
-    echo -e "\n${BLUE}Checking Temporal Server...${NC}"
-    if ! check_port localhost 7233 3 2; then
-        echo -e "${RED}✗ Error: Local Temporal Server is not running${NC}"
-        echo -e "Please start it first with:"
-        echo -e "${GREEN}temporal server start-dev --ui-port 8080${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ Local Temporal Server is running${NC}"
-else
-    echo -e "\n${BLUE}Checking Temporal Cloud configuration...${NC}"
-    if [ -z "$TEMPORAL_TLS_CERT" ] || [ -z "$TEMPORAL_TLS_KEY" ]; then
-        echo -e "${RED}✗ Error: TEMPORAL_TLS_CERT and TEMPORAL_TLS_KEY must be set for Temporal Cloud${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ Temporal Cloud credentials verified${NC}"
+# Check Temporal Server
+echo -e "${BLUE}Checking Temporal Server...${NC}"
+if ! check_port localhost 7233 3 2; then
+    echo -e "${RED}ERROR: Temporal Server is not running. Please start it first.${NC}"
+    exit 1
 fi
+echo -e "${GREEN}✓ Temporal Server is running${NC}"
 
 # Check SigNoz/OpenTelemetry Collector
-echo -e "\n${BLUE}Checking OpenTelemetry Collector...${NC}"
+echo -e "${BLUE}Checking SigNoz/OpenTelemetry Collector...${NC}"
 if ! check_port localhost 4317 3 2; then
-    echo -e "${YELLOW}⚠ Warning: OpenTelemetry Collector is not running${NC}"
-    echo -e "   Metrics and traces will not be exported"
+    echo -e "${YELLOW}WARNING: SigNoz/OpenTelemetry Collector is not running. Metrics and traces will not be exported.${NC}"
 else
     echo -e "${GREEN}✓ OpenTelemetry Collector is running${NC}"
 fi
 
 # Clean existing processes
-echo -e "\n${BLUE}Preparing environment...${NC}"
-pkill -f "ts-node src/worker" 2>/dev/null || true
+echo -e "${BLUE}Cleaning up existing processes...${NC}"
+pkill -f "node dist/workers/helloWorldWorker.js" 2>/dev/null || true
 sleep 2
 
-# Install dependencies if needed
-echo -e "\n${BLUE}Checking dependencies...${NC}"
-if [ ! -d "node_modules" ]; then
-    echo -e "${YELLOW}Installing dependencies...${NC}"
-    npm install
-fi
+# Install dependencies and build
+echo -e "${BLUE}Installing dependencies and building...${NC}"
+npm install
+npm run build
 
-# Start the worker
-echo -e "\n${BLUE}Starting worker process...${NC}"
-npm run worker &
+# Start worker
+echo -e "${BLUE}Starting worker...${NC}"
+node dist/workers/helloWorldWorker.js &
 WORKER_PID=$!
 
-# Check if worker started successfully
-if ! check_worker $WORKER_PID; then
-    echo -e "${RED}Error: Worker failed to start. Check the logs above for details.${NC}"
-    exit 1
-fi
-
-# Start the workflow
-echo -e "\n${BLUE}Executing workflow...${NC}"
-if npm run workflow; then
-    echo -e "${GREEN}✓ Workflow completed successfully${NC}"
+# Wait for worker initialization
+echo -e "${BLUE}Waiting for worker initialization...${NC}"
+sleep 5
+if ps -p $WORKER_PID > /dev/null; then
+    echo -e "${GREEN}✓ Worker initialized${NC}"
 else
-    echo -e "${RED}✗ Workflow execution failed${NC}"
+    echo -e "${RED}ERROR: Worker failed to start${NC}"
     exit 1
 fi
 
-echo -e "\n${BLUE}Demo completed successfully${NC}"
-echo -e "${BLUE}════════════════════════════════════════════${NC}" 
+# Start workflow
+echo -e "${BLUE}Starting workflow...${NC}"
+node dist/main/helloWorldStarter.js
+
+# Cleanup at the end
+cleanup 
