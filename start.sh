@@ -107,14 +107,8 @@ if ! command -v npm &> /dev/null; then
 fi
 
 # OpenTelemetry Configuration
-export OTEL_EXPORTER_OTLP_PROTOCOL="grpc"
-export OTEL_EXPORTER_OTLP_ENDPOINT="localhost:4317"
-export OTEL_RESOURCE_ATTRIBUTES="service.name=temporal-hello-world,deployment.environment=development"
-export OTEL_TRACES_SAMPLER="always_on"
-export OTEL_METRICS_EXPORTER="otlp"
-export OTEL_LOGS_EXPORTER="otlp"
-export OTEL_PROPAGATORS="tracecontext,baggage"
-export OTEL_SERVICE_NAME="temporal-hello-world"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
+export OTEL_RESOURCE_ATTRIBUTES="service.name=temporal-hello-world,environment=development"
 
 # If SigNoz ingestion key is provided, set it
 if [ ! -z "$SIGNOZ_INGESTION_KEY" ]; then
