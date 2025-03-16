@@ -64,15 +64,7 @@ fi
 
 # OpenTelemetry Configuration
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="http://localhost:4317"
-export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT="http://localhost:4317"
 export OTEL_RESOURCE_ATTRIBUTES="service.name=temporal-hello-world,environment=development"
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_TRACES_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=none
-export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-export OTEL_EXPORTER_OTLP_HEADERS="signoz-access-token=1234567890"
-export OTEL_LOG_LEVEL="debug"
 
 echo -e "${BLUE}Starting application...${NC}"
 
