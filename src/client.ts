@@ -1,12 +1,56 @@
 import { Client, Connection } from '@temporalio/client';
 import { nanoid } from 'nanoid';
+import * as fs from 'fs';
+import * as path from 'path';
 
 async function run() {
   console.log('Creating Temporal client...');
-  const connection = await Connection.connect();
+  
+  // Check for Temporal Cloud environment variables
+  const host = process.env.TEMPORAL_HOST_URL || 'localhost:7233';
+  const namespace = process.env.TEMPORAL_NAMESPACE || 'default';
+  
+  let connection;
+  
+  // If connecting to Temporal Cloud
+  if (process.env.TEMPORAL_HOST_URL) {
+    console.log(`Connecting to Temporal Cloud at ${host} with namespace ${namespace}`);
+    
+    // Verify that TLS cert and key are available
+    const tlsCert = process.env.TEMPORAL_TLS_CERT;
+    const tlsKey = process.env.TEMPORAL_TLS_KEY;
+    
+    if (!tlsCert || !tlsKey) {
+      throw new Error('TEMPORAL_TLS_CERT and TEMPORAL_TLS_KEY must be set for Temporal Cloud connection');
+    }
+    
+    // Check if the files exist
+    const certPath = path.resolve(process.cwd(), tlsCert);
+    const keyPath = path.resolve(process.cwd(), tlsKey);
+    
+    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+      throw new Error(`TLS certificates not found at ${certPath} or ${keyPath}`);
+    }
+    
+    connection = await Connection.connect({
+      address: host,
+      tls: {
+        serverNameOverride: host.split(':')[0],
+        clientCertPair: {
+          crt: fs.readFileSync(certPath),
+          key: fs.readFileSync(keyPath),
+        },
+      },
+    });
+  } else {
+    // Connect to local Temporal server
+    console.log('Connecting to local Temporal server at localhost:7233');
+    connection = await Connection.connect();
+  }
+  
   const client = new Client({
     connection,
-    namespace: 'default',
+    namespace,
   });
 
   const workflowId = `hello-world-${nanoid()}`;
