@@ -5,9 +5,9 @@
   "main": "dist/main/helloWorldStarter.js",
   "scripts": {
     "build": "tsc",
-    "worker": "node dist/workers/helloWorldWorker.js",
-    "workflow": "node dist/main/helloWorldStarter.js",
-    "start": "npm run build && concurrently \"npm run worker\" \"sleep 5 && npm run workflow\""
+    "worker": "ts-node src/worker.ts",
+    "workflow": "ts-node src/client.ts",
+    "start": "concurrently \"npm run worker\" \"sleep 5 && npm run workflow\""
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.9.0",
@@ -29,7 +29,8 @@
     "@temporalio/client": "^1.9.0",
     "@temporalio/common": "^1.9.0",
     "@temporalio/worker": "^1.9.0",
-    "@temporalio/workflow": "^1.9.0"
+    "@temporalio/workflow": "^1.9.0",
+    "nanoid": "^5.1.4"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 # Function to cleanup processes
 cleanup() {
     echo -e "\nCleaning up processes..."
-    pkill -f "node dist/workers/helloWorldWorker.js" 2>/dev/null || true
+    pkill -f "ts-node src/worker.ts" 2>/dev/null || true
     exit 0
 }
 
@@ -76,13 +76,36 @@ export OTEL_LOG_LEVEL="debug"
 
 echo -e "${BLUE}Starting application...${NC}"
 
-# Check Temporal Server
-echo -e "${BLUE}Checking Temporal Server...${NC}"
-if ! check_port localhost 7233 3 2; then
-    echo -e "${RED}ERROR: Temporal Server is not running. Please start it first.${NC}"
-    exit 1
+# Debug output
+echo "TEMPORAL_HOST_URL: '$TEMPORAL_HOST_URL'"
+echo "TEMPORAL_NAMESPACE: '$TEMPORAL_NAMESPACE'"
+echo "TEMPORAL_TLS_CERT: '$TEMPORAL_TLS_CERT'"
+echo "TEMPORAL_TLS_KEY: '$TEMPORAL_TLS_KEY'"
+
+if is_temporal_cloud; then
+    echo "Detected Temporal Cloud configuration"
+    # Check if we have the required variables for Temporal Cloud
+    if [ -z "$TEMPORAL_TLS_CERT" ] || [ -z "$TEMPORAL_TLS_KEY" ]; then
+        echo -e "${RED}ERROR: TEMPORAL_TLS_CERT and TEMPORAL_TLS_KEY must be set for Temporal Cloud${NC}"
+        exit 1
+    fi
+
+    # Check if certificate files exist
+    if [ ! -f "$TEMPORAL_TLS_CERT" ] || [ ! -f "$TEMPORAL_TLS_KEY" ]; then
+        echo -e "${RED}ERROR: Certificate files $TEMPORAL_TLS_CERT or $TEMPORAL_TLS_KEY not found${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✓ Using Temporal Cloud at $TEMPORAL_HOST_URL with namespace $TEMPORAL_NAMESPACE${NC}"
+else
+    # Only check for local server if not using Temporal Cloud
+    echo -e "${BLUE}Checking Temporal Server...${NC}"
+    if ! check_port localhost 7233 3 2; then
+        echo -e "${RED}ERROR: Temporal Server is not running. Please start it first.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Temporal Server is running${NC}"
 fi
-echo -e "${GREEN}✓ Temporal Server is running${NC}"
 
 # Check SigNoz/OpenTelemetry Collector
 echo -e "${BLUE}Checking SigNoz/OpenTelemetry Collector...${NC}"
@@ -94,17 +117,19 @@ fi
 
 # Clean existing processes
 echo -e "${BLUE}Cleaning up existing processes...${NC}"
-pkill -f "node dist/workers/helloWorldWorker.js" 2>/dev/null || true
+pkill -f "ts-node src/worker.ts" 2>/dev/null || true
 sleep 2
 
-# Install dependencies and build
-echo -e "${BLUE}Installing dependencies and building...${NC}"
-npm install
-npm run build
+# Install dependencies if needed
+echo -e "${BLUE}Installing dependencies...${NC}"
+if [ ! -d "node_modules" ]; then
+    echo -e "${YELLOW}Installing dependencies...${NC}"
+    npm install
+fi
 
 # Start worker
 echo -e "${BLUE}Starting worker...${NC}"
-node dist/workers/helloWorldWorker.js &
+npm run worker &
 WORKER_PID=$!
 
 # Wait for worker initialization
@@ -119,7 +144,7 @@ fi
 
 # Start workflow
 echo -e "${BLUE}Starting workflow...${NC}"
-node dist/main/helloWorldStarter.js
+npm run workflow
 
 # Cleanup at the end
 cleanup 
