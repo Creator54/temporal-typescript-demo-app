@@ -1,12 +1,13 @@
 import { Client, Connection } from '@temporalio/client';
 import * as fs from 'fs';
-import * as path from 'path';
 import { initOpenTelemetry } from './config/opentelemetryConfig';
 import { forceSpanExport, getTracer, getMeter } from './config/signozTelemetryUtils';
-import { DEFAULT_TASK_QUEUE } from './config/temporalConfig';
-import { trace, SpanKind, context, SpanStatusCode, AttributeValue } from '@opentelemetry/api';
+import { DEFAULT_TASK_QUEUE, registerDashboardMetrics, configureTemporalTracing } from './config/temporalConfig';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
+import { trace, SpanKind, context, SpanStatusCode } from '@opentelemetry/api';
+import * as WorkflowMetricsUtil from './config/workflowMetricsUtil';
 
-// Simple ID generator function to replace nanoid
+// Simple ID generator function
 function generateId(length = 8) {
   const characters = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -17,27 +18,51 @@ function generateId(length = 8) {
 }
 
 async function run() {
+  // Configure Temporal tracing to match Java implementation
+  configureTemporalTracing();
+  
+  // Set environment variables for SigNoz
+  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4317';
+  process.env.OTEL_EXPORTER_OTLP_PROTOCOL = 'grpc';
+  process.env.OTEL_METRICS_EXPORT_INTERVAL = '5000';
+  process.env.OTEL_METRICS_EXPORT_TIMEOUT = '30000';
+  
   // Initialize OpenTelemetry
   console.log('[STARTER] Initializing OpenTelemetry...');
   await initOpenTelemetry('temporal-hello-world');
   console.log('[STARTER] OpenTelemetry initialized successfully');
+
+  // Initialize metrics
+  WorkflowMetricsUtil.initializeMetrics();
+
+  // Record initial service request for SigNoz dashboard
+  WorkflowMetricsUtil.recordServiceRequest('ClientStart');
+
+  // Start periodic metrics emissions for dashboard
+  const stopMetrics = registerDashboardMetrics();
 
   // Get tracer and meter instances for instrumentation
   const tracer = getTracer();
   const meter = getMeter();
 
   // Create workflow execution counter for monitoring workflow activity
-  const workflowCounter = meter.createCounter('workflow.executions', {
-    description: 'Number of workflow executions'
+  const workflowStartCounter = meter.createCounter('workflow_started_count_total', {
+    description: 'Total workflow executions started'
+  });
+  
+  const workflowCompletionCounter = meter.createCounter('workflow_completed_count_total', {
+    description: 'Total workflow executions completed'
   });
 
   // Create main "StartWorkflow" span to track the entire workflow execution process
   const startWorkflowSpan = tracer.startSpan('StartWorkflow', {
     kind: SpanKind.INTERNAL,
     attributes: {
-      'workflow.type': 'temporal',
+      'workflow.type': 'HelloWorld',
       'service.name': 'temporal-hello-world',
-      'temporal.component': 'starter',
+      'service.namespace': 'default',
+      'deployment.environment': process.env.OTEL_ENVIRONMENT || 'development',
+      'temporal.component': 'starter'
     }
   });
 
@@ -51,7 +76,6 @@ async function run() {
       // Check for Temporal Cloud environment variables
       const host = process.env.TEMPORAL_HOST_URL || 'localhost:7233';
       const namespace = process.env.TEMPORAL_NAMESPACE || 'default';
-      const taskQueue = DEFAULT_TASK_QUEUE;
       
       let connection;
       
@@ -67,138 +91,192 @@ async function run() {
           throw new Error('TEMPORAL_TLS_CERT and TEMPORAL_TLS_KEY must be set for Temporal Cloud connection');
         }
         
-        // Check if the files exist
-        const certPath = path.resolve(process.cwd(), tlsCert);
-        const keyPath = path.resolve(process.cwd(), tlsKey);
+        // Read certificate files
+        let certPem: Buffer | string = tlsCert;
+        let keyPem: Buffer | string = tlsKey;
         
-        if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
-          throw new Error(`TLS certificates not found at ${certPath} or ${keyPath}`);
+        // If the cert and key are file paths, read them
+        if (tlsCert.endsWith('.pem') && fs.existsSync(tlsCert)) {
+          certPem = fs.readFileSync(tlsCert);
+        }
+        
+        if (tlsKey.endsWith('.key') && fs.existsSync(tlsKey)) {
+          keyPem = fs.readFileSync(tlsKey);
         }
         
         connection = await Connection.connect({
           address: host,
           tls: {
-            serverNameOverride: host.split(':')[0],
+            serverNameOverride: process.env.TEMPORAL_SERVER_NAME || host.split(':')[0],
             clientCertPair: {
-              crt: fs.readFileSync(certPath),
-              key: fs.readFileSync(keyPath),
+              crt: certPem as Buffer,
+              key: keyPem as Buffer,
             },
           },
         });
       } else {
-        // Connect to local Temporal server
-        console.log('Connecting to local Temporal server at localhost:7233');
-        connection = await Connection.connect();
+        // For local development
+        console.log(`Connecting to local Temporal server at ${host} with namespace ${namespace}`);
+        connection = await Connection.connect({
+          address: host,
+        });
       }
       
       const client = new Client({
         connection,
         namespace,
+        dataConverter: {
+          payloadConverterPath: require.resolve('./config/temporalConfig'),
+        },
+        // Use the official OpenTelemetry client interceptor with the correct format
+        interceptors: {
+          workflow: [new OpenTelemetryWorkflowClientInterceptor()]
+        }
       });
-
+      
+      // Generate a unique workflow ID for this execution
       const workflowId = `hello-world-${generateId()}`;
       console.log('Starting workflow with ID:', workflowId);
-
-      // Create a child span for the specific workflow execution
-      const executeWorkflowSpan = tracer.startSpan('ExecuteWorkflow', {
-        kind: SpanKind.INTERNAL,
-        attributes: {
-          'workflow.id': workflowId,
-          'workflow.name': 'HelloWorldWorkflow',
-          'workflow.task_queue': taskQueue,
-          'service.name': 'temporal-hello-world',
-          'temporal.component': 'starter',
-          'temporal.workflow.type': 'HelloWorldWorkflow'
-        }
+      
+      // Record workflow started metric
+      workflowStartCounter.add(1, {
+        'workflow_type': workflowId,
+        'operation': 'StartWorkflow'
       });
-
-      // Create another span for the specific workflow type
-      const workflowTypeSpan = tracer.startSpan(`StartWorkflow:HelloWorldWorkflow`, {
-        kind: SpanKind.INTERNAL,
-        attributes: {
-          'workflow.id': workflowId,
-          'workflow.name': 'HelloWorldWorkflow',
-          'workflow.task_queue': taskQueue,
-          'service.name': 'temporal-hello-world',
-          'temporal.component': 'starter',
-          'temporal.workflow.type': 'HelloWorldWorkflow'
-        }
-      });
-
-      // Track the execution with our counter
-      workflowCounter.add(1, {
-        'workflow.name': 'HelloWorldWorkflow',
-        'workflow.task_queue': taskQueue
-      });
-
+      
+      // Record service request metric for SigNoz dashboard
+      WorkflowMetricsUtil.recordServiceRequest('StartWorkflow');
+      
+      // Use a consistent workflow name - can be either 'sayHello' or 'HelloWorldWorkflow'
+      // since we export both in the workflows/index.ts
+      const workflow = 'HelloWorldWorkflow';
+      const runId = generateId(12);
+      
+      // Add workflow started attribute to parent span
+      startWorkflowSpan.setAttribute('workflow.started', true);
+      startWorkflowSpan.setAttribute('workflow.name', 'Temporal');
+      startWorkflowSpan.setAttribute('workflow.id', workflowId);
+      
       try {
         console.log('Executing workflow...');
-        const handle = await client.workflow.start('sayHello', {
-          taskQueue: taskQueue,
-          workflowId,
-          args: ['Temporal'],
-          workflowExecutionTimeout: '1 minute',
+        console.log(`Starting workflow '${workflow}' in task queue '${DEFAULT_TASK_QUEUE}'`);
+        
+        // Create ExecuteWorkflow span as a child of StartWorkflow
+        const executeWorkflowSpan = tracer.startSpan('ExecuteWorkflow', {
+          kind: SpanKind.INTERNAL,
+          attributes: {
+            'workflow.id': workflowId,
+            'workflow.type': 'HelloWorld',
+            'service.name': 'temporal-hello-world',
+            'service.namespace': 'default',
+            'workflow.task_queue': DEFAULT_TASK_QUEUE
+          }
         });
-
-        console.log('Waiting for workflow result...');
-        const result = await handle.result();
-        console.log('Workflow completed successfully!');
-        console.log('Workflow result:', result);
-
-        // Record successful outcome in our spans
-        executeWorkflowSpan.setStatus({ code: SpanStatusCode.OK });
-        executeWorkflowSpan.setAttribute('workflow.status', 'completed');
-        executeWorkflowSpan.setAttribute('temporal.status', 'completed');
-        executeWorkflowSpan.setAttribute('workflow.result', result);
-
-        workflowTypeSpan.setStatus({ code: SpanStatusCode.OK });
-        workflowTypeSpan.setAttribute('workflow.status', 'completed');
-        workflowTypeSpan.setAttribute('temporal.status', 'completed');
-        workflowTypeSpan.setAttribute('workflow.result', result);
-
-        // End child spans
-        executeWorkflowSpan.end();
-        workflowTypeSpan.end();
-      } catch (err) {
-        console.error('Error running workflow:', err);
         
-        // Record error in our spans
-        executeWorkflowSpan.setStatus({
-          code: SpanStatusCode.ERROR,
-          message: err instanceof Error ? err.message : String(err)
-        });
-        executeWorkflowSpan.setAttribute('workflow.status', 'failed');
-        executeWorkflowSpan.setAttribute('temporal.status', 'failed');
-        
-        workflowTypeSpan.setStatus({
-          code: SpanStatusCode.ERROR,
-          message: err instanceof Error ? err.message : String(err)
-        });
-        workflowTypeSpan.setAttribute('workflow.status', 'failed');
-        workflowTypeSpan.setAttribute('temporal.status', 'failed');
-        
-        // End child spans
-        executeWorkflowSpan.end();
-        workflowTypeSpan.end();
-        
-        process.exit(1);
-      } finally {
-        await connection.close();
+        try {
+          // Make the execution span active during workflow execution
+          const executeContext = trace.setSpan(context.active(), executeWorkflowSpan);
+          
+          const result = await context.with(executeContext, async () => {
+            const handle = await client.workflow.start(workflow, {
+              workflowId,
+              taskQueue: DEFAULT_TASK_QUEUE,
+              args: ['Temporal'],
+              memo: {
+                runId: runId,
+                description: 'A demonstration workflow for Temporal TypeScript',
+              },
+            });
+            
+            console.log(`Workflow started with ID: ${workflowId}, run ID: ${handle.firstExecutionRunId}`);
+            console.log('Waiting for workflow result...');
+            
+            // Add run ID to the executeWorkflowSpan as required by Java spec
+            executeWorkflowSpan.setAttribute('runid', handle.firstExecutionRunId);
+            
+            return await handle.result();
+          });
+          
+          // Record workflow completed metric
+          workflowCompletionCounter.add(1, {
+            'workflow_type': workflowId,
+            'operation': 'CompletionStats'
+          });
+          
+          // Record service request completion metric for SigNoz dashboard
+          WorkflowMetricsUtil.recordServiceRequest('WorkflowCompleted');
+          
+          console.log('Workflow completed with result:', result);
+          
+          // Record successful workflow execution in spans
+          executeWorkflowSpan.setAttribute('workflow.result', result);
+          executeWorkflowSpan.setStatus({ code: SpanStatusCode.OK });
+          startWorkflowSpan.setAttribute('workflow.completed', true);
+          
+          // Record workflow completion and success metrics
+          workflowCompletionCounter.add(1);
+          WorkflowMetricsUtil.recordSuccess(workflow, workflowId, workflowId, namespace);
+          
+          // Record additional operations for more complete metrics
+        } catch (error: any) {
+          console.error('Workflow execution failed:', error);
+          
+          // Record workflow failure in spans
+          executeWorkflowSpan.recordException(error);
+          executeWorkflowSpan.setStatus({ code: SpanStatusCode.ERROR });
+          startWorkflowSpan.setAttribute('workflow.completed', false);
+          
+          // Record workflow failure metric
+          workflowCompletionCounter.add(1);
+          WorkflowMetricsUtil.recordFailure(workflow, workflowId, runId, namespace);
+          
+          if (error.name === 'TimeoutError') {
+            WorkflowMetricsUtil.recordTimeout(workflow, workflowId, runId, namespace);
+            WorkflowMetricsUtil.recordTimeoutError();
+          } else {
+            WorkflowMetricsUtil.recordSystemError();
+          }
+          
+          throw error;
+        } finally {
+          // End the ExecuteWorkflow span
+          executeWorkflowSpan.end();
+        }
+      } catch (error: any) {
+        console.error('Error during workflow execution:', error);
+        startWorkflowSpan.recordException(error);
+        startWorkflowSpan.setStatus({ code: SpanStatusCode.ERROR });
+        throw error;
       }
     });
-  } catch (err) {
-    console.error('Error in workflow starter:', err);
-    startWorkflowSpan.setStatus({
-      code: SpanStatusCode.ERROR,
-      message: err instanceof Error ? err.message : String(err)
-    });
+  } catch (error) {
+    console.error('Error in workflow starter:', error);
+    startWorkflowSpan.setStatus({ code: SpanStatusCode.ERROR });
+    startWorkflowSpan.recordException(error as Error);
   } finally {
-    // Always end the main span and force export
+    // End the StartWorkflow span
     startWorkflowSpan.end();
-    console.log('[STARTER] Forcing export of telemetry data...');
+    
+    // Allow more time for metrics to be exported
+    console.log('Waiting for telemetry to be exported...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Stop the dashboard metrics timer
+    stopMetrics();
+    
+    // Force export of any pending spans
+    console.log('Forcing export of pending spans...');
     await forceSpanExport();
-    console.log('[STARTER] Telemetry export completed');
+    
+    // Clean up metrics resources
+    WorkflowMetricsUtil.cleanup();
+    
+    console.log('Workflow execution complete');
   }
 }
 
-run(); 
+// Run the workflow
+run().catch(err => {
+  console.error('Fatal error:', err);
+  process.exit(1);
+}); 

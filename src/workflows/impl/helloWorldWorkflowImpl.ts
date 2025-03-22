@@ -1,34 +1,24 @@
-import { proxyActivities } from '@temporalio/workflow';
-import { HelloWorldWorkflow } from '../interfaces/helloWorldWorkflow';
-
-// Import directly from the implementation instead of the interface
-// This ensures we get the actual exported activity functions
-import * as activities from '../../activities/impl/greetingActivitiesImpl';
-
-// Define activity stubs
-const { formatName, generateGreeting, addTimestamp } = proxyActivities<typeof activities>({
-    startToCloseTimeout: '1 minute',
-});
+import * as wf from '@temporalio/workflow';
+import WorkflowMetricsUtil from '../../config/workflowMetricsUtil';
 
 /**
- * HelloWorld Workflow Implementation
- * 
- * Orchestrates a sequence of activities to create a personalized greeting.
- * This implementation follows the workflow interface contract and handles
- * the execution of each activity in sequence.
+ * The HelloWorld Workflow Implementation.
+ * This is a direct port of the Java implementation.
  */
-export class HelloWorldWorkflowImpl implements HelloWorldWorkflow {
-    /**
-     * Creates a personalized greeting with timestamp
-     * @param name The name to include in the greeting
-     * @returns A formatted greeting with timestamp
-     */
-    async sayHello(name: string): Promise<string> {
-        const formattedName = await formatName(name);
-        const greeting = await generateGreeting(formattedName);
-        const timestampedGreeting = await addTimestamp(greeting);
-        return timestampedGreeting;
-    }
+export class HelloWorldWorkflowImpl {
+  /**
+   * Creates a greeting message for the given name.
+   * This implementation simply concatenates "Hello" with the name.
+   * 
+   * @param name Name to include in greeting
+   * @return Formatted greeting message
+   */
+  async sayHello(name: string): Promise<string> {
+    // Record workflow initialization verification
+    WorkflowMetricsUtil.recordInitVerification();
+
+    return "Hello " + name + "!";
+  }
 }
 
 /**
@@ -38,7 +28,7 @@ export class HelloWorldWorkflowImpl implements HelloWorldWorkflow {
  * to the workflow implementation class.
  * 
  * @param name The name to include in the greeting
- * @returns A formatted greeting with timestamp
+ * @returns A simple greeting message
  */
 export async function sayHello(name: string): Promise<string> {
     const workflow = new HelloWorldWorkflowImpl();

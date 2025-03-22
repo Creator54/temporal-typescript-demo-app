@@ -1,69 +1,108 @@
-import { diag, trace, metrics, Tracer, Meter, context } from '@opentelemetry/api';
+import { diag, trace, metrics, Tracer, Meter } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 
 /**
- * SignOz Telemetry Utilities
- * 
- * This module provides central access to tracer and meter instances
- * and manages the OpenTelemetry SDK lifecycle for SigNoz integration.
+ * Utility class for configuring and accessing SigNoz telemetry in temporal applications.
+ * Provides centralized access to meters, tracers, and other telemetry components.
  */
 
-// Store SDK instances for direct access
+// Persistent SDK and telemetry instances
 let sdkInstance: NodeSDK | null = null;
 let tracerInstance: Tracer | null = null;
 let meterInstance: Meter | null = null;
+let initialized = false;
 
 /**
- * Get the configured tracer instance
+ * Gets the configured tracer instance.
+ * Thread-safe and creates new instance if needed.
  * 
- * Returns the cached tracer instance if available, or creates a new one.
- * This ensures consistent tracing behavior throughout the application.
- * 
- * @returns OpenTelemetry Tracer instance
+ * @return Tracer instance for the application
  */
 export function getTracer(): Tracer {
     if (!tracerInstance) {
-        diag.warn('[TELEMETRY] No tracer instance available, creating a new one');
         tracerInstance = trace.getTracer('temporal-hello-world');
     }
     return tracerInstance;
 }
 
 /**
- * Get the configured meter instance
+ * Gets the configured meter instance.
+ * Thread-safe and creates new instance if needed.
  * 
- * Returns the cached meter instance if available, or creates a new one.
- * This ensures consistent metrics collection throughout the application.
- * 
- * @returns OpenTelemetry Meter instance
+ * @return Meter instance for the application
  */
 export function getMeter(): Meter {
     if (!meterInstance) {
-        diag.warn('[TELEMETRY] No meter instance available, creating a new one');
         meterInstance = metrics.getMeter('temporal-hello-world');
     }
     return meterInstance;
 }
 
 /**
- * Store the OpenTelemetry SDK instance for later access
- * 
- * @param sdk The SDK instance to store
+ * Initializes OpenTelemetry for the application.
+ * Sets up tracing, metrics and initializes dashboard-specific metrics.
  */
-export function setOpenTelemetrySdk(sdk: NodeSDK): void {
-    sdkInstance = sdk;
+export function initializeTelemetry(): void {
+    if (initialized) {
+        return;
+    }
+    
+    diag.info("Initializing OpenTelemetry...");
+    
+    try {
+        // SDK initialization handled in opentelemetryConfig.ts
+        
+        // Create instances for later use
+        tracerInstance = getTracer();
+        meterInstance = getMeter();
+        
+        initialized = true;
+        diag.info("OpenTelemetry initialized successfully");
+    } catch (error) {
+        diag.error(`Error initializing OpenTelemetry: ${error}`);
+    }
 }
 
 /**
- * Get the current OpenTelemetry SDK instance
- * 
- * Provides access to the underlying SDK for advanced configuration.
- * Use with caution as direct manipulation can affect the entire application.
- * 
- * @returns The current NodeSDK instance or null if not initialized
+ * Shuts down OpenTelemetry SDK.
+ * Ensures proper resource cleanup on application termination.
  */
-export function getOpenTelemetrySdk(): NodeSDK | null {
+export async function shutdownTelemetry(): Promise<void> {
+    if (!sdkInstance) {
+        return;
+    }
+    
+    try {
+        diag.info("Shutting down OpenTelemetry SDK...");
+        await sdkInstance.shutdown();
+        sdkInstance = null;
+        tracerInstance = null;
+        meterInstance = null;
+        initialized = false;
+        diag.info("OpenTelemetry SDK shut down successfully");
+    } catch (error) {
+        diag.error(`Error shutting down OpenTelemetry SDK: ${error}`);
+    }
+}
+
+/**
+ * Gets the OpenTelemetry SDK instance.
+ * Allows direct access to the SDK for advanced configuration.
+ * 
+ * @return NodeSDK instance
+ */
+export function getSDK(): NodeSDK | null {
     return sdkInstance;
+}
+
+/**
+ * Sets the OpenTelemetry SDK instance.
+ * Used during SDK initialization.
+ * 
+ * @param sdk The initialized SDK instance
+ */
+export function setSDK(sdk: NodeSDK): void {
+    sdkInstance = sdk;
 }
 
 /**
@@ -75,30 +114,45 @@ export function getOpenTelemetrySdk(): NodeSDK | null {
  * @returns Promise that resolves when export is complete or times out
  */
 export async function forceSpanExport(): Promise<boolean> {
-    diag.info('[TELEMETRY] Forcing export of pending spans');
-    
     if (!sdkInstance) {
-        diag.warn('[TELEMETRY] No SDK instance available, nothing to export');
         return false;
     }
     
-    // Create a promise that times out after 3 seconds
+    diag.info('Forcing export of pending spans');
+    
+    // Create a promise that times out after 5 seconds
     const timeoutPromise = new Promise<boolean>((resolve) => {
         setTimeout(() => {
-            diag.warn('[TELEMETRY] Span export timed out after 3 seconds');
+            diag.warn('Span export timed out after 5 seconds');
             resolve(false);
-        }, 3000);
+        }, 5000);
     });
     
     // Create a promise for the shutdown
     const shutdownPromise = sdkInstance.shutdown().then(() => {
-        diag.info('[TELEMETRY] SDK shutdown complete, spans exported');
+        diag.info('SDK shutdown complete, spans exported');
+        // Reset instances after shutdown
+        sdkInstance = null;
+        tracerInstance = null;
+        meterInstance = null;
+        initialized = false;
         return true;
     }).catch(err => {
-        diag.error('[TELEMETRY] Error during SDK shutdown:', err);
+        diag.error('Error during SDK shutdown:', err);
         return false;
     });
     
     // Return the first promise that resolves
     return Promise.race([shutdownPromise, timeoutPromise]);
-} 
+}
+
+// Export default object with all methods
+export default {
+    getTracer,
+    getMeter,
+    initializeTelemetry,
+    shutdownTelemetry,
+    forceSpanExport,
+    getSDK,
+    setSDK
+}; 

@@ -3,36 +3,11 @@ import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
 import { PeriodicExportingMetricReader, MetricReader } from '@opentelemetry/sdk-metrics';
 
 /**
- * Metrics Configuration
- * 
- * This module configures the metrics exporter for OpenTelemetry
- * and provides utilities for metrics collection.
+ * Configures and manages OpenTelemetry metrics export for Temporal.
+ * This class provides:
+ * 1. OTLP metrics exporter configuration
+ * 2. Periodic metrics reader setup
  */
-
-/**
- * Get a configured metrics reader for periodic export
- * 
- * Creates and configures a PeriodicExportingMetricReader that exports
- * metrics to the configured endpoint on a regular interval.
- * 
- * @param options Optional configuration parameters
- * @param options.intervalMillis Export interval in milliseconds (default: 15000)
- * @returns Configured PeriodicExportingMetricReader ready for use
- */
-export function getMetricsReader(options?: { intervalMillis?: number }): MetricReader {
-    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317';
-    const intervalMillis = options?.intervalMillis || 15000;
-    
-    diag.info(`[TELEMETRY] Configuring metrics exporter with interval ${intervalMillis}ms`);
-    
-    // Use type assertion to overcome private property conflict
-    return new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({
-            url: endpoint, // For gRPC, we don't need to specify the path
-        }),
-        exportIntervalMillis: intervalMillis,
-    }) as unknown as MetricReader;
-}
 
 /**
  * Configure metrics-related environment variables
@@ -41,6 +16,74 @@ export function getMetricsReader(options?: { intervalMillis?: number }): MetricR
  * to ensure consistent behavior across the application.
  */
 export function configureMetricsEnvironment(): void {
-    // Configure environment variables for metrics
-    process.env.OTEL_METRICS_EXPORTER = 'otlp';
-} 
+    // Configure environment variables for metrics if not already set
+    if (!process.env.OTEL_METRICS_EXPORTER) {
+        process.env.OTEL_METRICS_EXPORTER = 'otlp';
+    }
+    
+    if (!process.env.OTEL_EXPORTER_OTLP_PROTOCOL) {
+        process.env.OTEL_EXPORTER_OTLP_PROTOCOL = 'grpc';
+    }
+    
+    if (!process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT && process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+        // Use the generic endpoint for metrics if specific one not set
+        process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    }
+    
+    // Force temporality to match Java app
+    process.env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE = 'cumulative';
+    
+    diag.info('Metrics environment configured');
+}
+
+/**
+ * Gets a configured metrics reader for periodic export.
+ * Creates a reader that periodically exports metrics via OTLP.
+ * 
+ * @param options Optional configuration parameters
+ * @return Configured metric reader ready for use
+ */
+export function getMetricsReader(options?: { intervalMillis?: number }): MetricReader {
+    const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317';
+    const intervalMillis = options?.intervalMillis || 1000;
+    
+    // Create OTLP gRPC exporter
+    const exporter = new OTLPMetricExporter({
+        url: endpoint,
+        timeoutMillis: 15000
+    });
+    
+    // Create periodic reader with configured interval
+    const reader = new PeriodicExportingMetricReader({
+        exporter,
+        exportIntervalMillis: intervalMillis
+    });
+    
+    return reader;
+}
+
+/**
+ * Get the standard OpenTelemetry headers.
+ * Extracts headers from environment variables if available.
+ * 
+ * @return Headers object for exporters
+ */
+export function getOtelHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    
+    // Extract headers from environment variables
+    Object.keys(process.env).forEach(key => {
+        if (key.startsWith('OTEL_EXPORTER_OTLP_HEADERS_')) {
+            const headerName = key.replace('OTEL_EXPORTER_OTLP_HEADERS_', '').toLowerCase();
+            headers[headerName] = process.env[key] || '';
+        }
+    });
+    
+    return headers;
+}
+
+export default {
+    getMetricsReader,
+    getOtelHeaders,
+    configureMetricsEnvironment
+}; 

@@ -28,6 +28,7 @@
     "@opentelemetry/semantic-conventions": "^1.19.0",
     "@temporalio/client": "^1.9.0",
     "@temporalio/common": "^1.9.0",
+    "@temporalio/interceptors-opentelemetry": "^1.11.7",
     "@temporalio/worker": "^1.9.0",
     "@temporalio/workflow": "^1.9.0",
     "nanoid": "^5.1.4"
