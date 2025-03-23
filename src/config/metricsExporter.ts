@@ -45,18 +45,29 @@ export function configureMetricsEnvironment(): void {
  */
 export function getMetricsReader(options?: { intervalMillis?: number }): MetricReader {
     const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4317';
-    const intervalMillis = options?.intervalMillis || 1000;
+    const intervalMillis = options?.intervalMillis || 5000; // Match Java's default 5s interval
+    
+    console.log(`[METRICS] Configuring metrics reader with endpoint ${endpoint} and interval ${intervalMillis}ms`);
+    
+    // Get OpenTelemetry headers from environment variables
+    const headers = getOtelHeaders();
+    const headerKeys = Object.keys(headers);
+    if (headerKeys.length > 0) {
+        console.log(`[METRICS] Using headers: ${headerKeys.join(', ')}`);
+    }
     
     // Create OTLP gRPC exporter
     const exporter = new OTLPMetricExporter({
         url: endpoint,
-        timeoutMillis: 15000
+        timeoutMillis: 15000,
+        headers: headers // Include any headers from env variables
     });
     
     // Create periodic reader with configured interval
     const reader = new PeriodicExportingMetricReader({
         exporter,
-        exportIntervalMillis: intervalMillis
+        exportIntervalMillis: intervalMillis,
+        exportTimeoutMillis: Math.floor(intervalMillis * 0.8) // Set timeout to 80% of interval to ensure it's always less
     });
     
     return reader;

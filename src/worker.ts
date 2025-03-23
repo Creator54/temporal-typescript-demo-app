@@ -16,11 +16,13 @@ async function run() {
   // Configure Temporal tracing to match Java implementation
   configureTemporalTracing();
   
-  // Set environment variables for SigNoz
-  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4317';
+  // Set environment variables for SigNoz if not already set
+  if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4317';
+  }
   process.env.OTEL_EXPORTER_OTLP_PROTOCOL = 'grpc';
   process.env.OTEL_METRICS_EXPORT_INTERVAL = '5000';
-  process.env.OTEL_METRICS_EXPORT_TIMEOUT = '30000';
+  process.env.OTEL_METRICS_EXPORT_TIMEOUT = '4000'; // Ensure timeout is less than interval
   
   // Initialize OpenTelemetry
   console.log('[WORKER] Initializing OpenTelemetry...');
@@ -69,15 +71,56 @@ async function run() {
     
     try {
       // Create Temporal connection - detailed logging for user visibility
-      console.log(`Connecting to local Temporal server at localhost:7233 with namespace default`);
+      console.log(`Connecting to Temporal server at ${process.env.TEMPORAL_HOST_URL || 'localhost:7233'} with namespace ${process.env.TEMPORAL_NAMESPACE || 'default'}`);
       
-      // Create connection with explicit namespace
-      const connection = await NativeConnection.connect({
-        address: 'localhost:7233',
-        tls: false,
-      });
+      // Check if using Temporal Cloud
+      const useTemporalCloud = !!process.env.TEMPORAL_HOST_URL;
+      let connection;
       
-      const namespace = 'default';
+      if (useTemporalCloud) {
+        // Verify TLS certificates exist
+        const tlsCert = process.env.TEMPORAL_TLS_CERT;
+        const tlsKey = process.env.TEMPORAL_TLS_KEY;
+        
+        if (!tlsCert || !tlsKey) {
+          throw new Error('TEMPORAL_TLS_CERT and TEMPORAL_TLS_KEY must be set for Temporal Cloud connection');
+        }
+        
+        // Read certificate files
+        let certPem: Buffer | string = tlsCert;
+        let keyPem: Buffer | string = tlsKey;
+        
+        // If the cert and key are file paths, read them
+        if (tlsCert.endsWith('.pem') && fs.existsSync(tlsCert)) {
+          certPem = fs.readFileSync(tlsCert);
+        }
+        
+        if (tlsKey.endsWith('.key') && fs.existsSync(tlsKey)) {
+          keyPem = fs.readFileSync(tlsKey);
+        }
+        
+        // Connect to Temporal Cloud with TLS
+        console.log(`Using TLS with cert: ${tlsCert}, key: ${tlsKey}`);
+        const host = process.env.TEMPORAL_HOST_URL || '';
+        connection = await NativeConnection.connect({
+          address: host,
+          tls: {
+            serverNameOverride: process.env.TEMPORAL_SERVER_NAME || host.split(':')[0],
+            clientCertPair: {
+              crt: certPem as Buffer,
+              key: keyPem as Buffer,
+            },
+          },
+        });
+      } else {
+        // Connect to local Temporal server
+        connection = await NativeConnection.connect({
+          address: 'localhost:7233',
+          tls: false,
+        });
+      }
+      
+      const namespace = process.env.TEMPORAL_NAMESPACE || 'default';
       const taskQueue = DEFAULT_TASK_QUEUE;
       
       // Record service restart for worker

@@ -21,11 +21,13 @@ async function run() {
   // Configure Temporal tracing to match Java implementation
   configureTemporalTracing();
   
-  // Set environment variables for SigNoz
-  process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4317';
+  // Set environment variables for SigNoz if not already set
+  if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4317';
+  }
   process.env.OTEL_EXPORTER_OTLP_PROTOCOL = 'grpc';
   process.env.OTEL_METRICS_EXPORT_INTERVAL = '5000';
-  process.env.OTEL_METRICS_EXPORT_TIMEOUT = '30000';
+  process.env.OTEL_METRICS_EXPORT_TIMEOUT = '4000'; // Ensure timeout is less than interval
   
   // Initialize OpenTelemetry
   console.log('[STARTER] Initializing OpenTelemetry...');
