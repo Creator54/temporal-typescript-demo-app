@@ -1,5 +1,6 @@
 import { Client, Connection } from '@temporalio/client';
-import { nanoid } from 'nanoid';
+import { randomUUID } from 'crypto';
+import { greetUser } from './workflows';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -53,12 +54,12 @@ async function run() {
     namespace,
   });
 
-  const workflowId = `hello-world-${nanoid()}`;
+  const workflowId = `hello-world-${randomUUID()}`;
   console.log('Starting workflow with ID:', workflowId);
 
   try {
     console.log('Executing workflow...');
-    const handle = await client.workflow.start('execute', {
+    const result = await client.workflow.execute(greetUser, {
       taskQueue: 'hello-world-task-queue',
       workflowId,
       args: ['Temporal'],
@@ -66,7 +67,6 @@ async function run() {
     });
 
     console.log('Waiting for workflow result...');
-    const result = await handle.result();
     console.log('Workflow completed successfully!');
     console.log('Workflow result:', result);
   } catch (err) {

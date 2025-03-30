@@ -6,7 +6,7 @@ const { sayHello } = proxyActivities<typeof activities>({
 });
 
 /** A workflow that simply calls an activity */
-export async function execute(name: string): Promise<string> {
+export async function greetUser(name: string): Promise<string> {
   log.info('Starting workflow execution', { name });
   try {
     const result = await sayHello(name);
