@@ -1,4 +1,5 @@
 import { Client, Connection } from '@temporalio/client';
+import { OpenTelemetryWorkflowClientInterceptor } from '@temporalio/interceptors-opentelemetry';
 import { randomUUID } from 'crypto';
 import { greetUser } from './workflows';
 import * as fs from 'fs';
@@ -52,6 +53,10 @@ async function run() {
   const client = new Client({
     connection,
     namespace,
+    // Registers OpenTelemetry Tracing interceptor for Client calls
+    interceptors: {
+      workflow: [new OpenTelemetryWorkflowClientInterceptor()],
+    },
   });
 
   const workflowId = `hello-world-${randomUUID()}`;

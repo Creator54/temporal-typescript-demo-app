@@ -1,5 +1,10 @@
-import { proxyActivities, log } from '@temporalio/workflow';
+import { proxyActivities, log, WorkflowInterceptorsFactory } from '@temporalio/workflow';
 import type * as activities from './activities';
+import {
+  OpenTelemetryInboundInterceptor,
+  OpenTelemetryOutboundInterceptor,
+  OpenTelemetryInternalsInterceptor,
+} from '@temporalio/interceptors-opentelemetry/lib/workflow';
 
 const { sayHello } = proxyActivities<typeof activities>({
   startToCloseTimeout: '10 seconds',
@@ -16,4 +21,11 @@ export async function greetUser(name: string): Promise<string> {
     log.error('Workflow failed', { error: err });
     throw err;
   }
-} 
+}
+
+// Export the interceptors
+export const interceptors: WorkflowInterceptorsFactory = () => ({
+  inbound: [new OpenTelemetryInboundInterceptor()],
+  outbound: [new OpenTelemetryOutboundInterceptor()],
+  internals: [new OpenTelemetryInternalsInterceptor()],
+});

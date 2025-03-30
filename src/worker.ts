@@ -1,9 +1,30 @@
-import { NativeConnection, Worker } from '@temporalio/worker';
+import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import * as activities from './activities';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  OpenTelemetryActivityInboundInterceptor,
+  OpenTelemetryActivityOutboundInterceptor,
+  makeWorkflowExporter,
+} from '@temporalio/interceptors-opentelemetry/lib/worker';
+import { otelSdk, resource, traceExporter } from './instrumentation';
+
+function initializeRuntime() {
+  Runtime.install({
+    telemetryOptions: {
+      metrics: {
+        otel: {
+          url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://127.0.0.1:4317',
+          metricsExportInterval: '1s'
+        }
+      },
+    },
+  });
+}
 
 async function run() {
+  initializeRuntime();
+
   let worker: Worker | undefined;
   try {
     // Check for Temporal Cloud environment variables
@@ -57,6 +78,18 @@ async function run() {
       taskQueue,
       workflowsPath: require.resolve('./workflows'),
       activities,
+      sinks: traceExporter && {
+        exporter: makeWorkflowExporter(traceExporter, resource),
+      },
+      interceptors: traceExporter && {
+        workflowModules: [require.resolve('./workflows')],
+        activity: [
+          (ctx) => ({
+            inbound: new OpenTelemetryActivityInboundInterceptor(ctx),
+            outbound: new OpenTelemetryActivityOutboundInterceptor(ctx),
+          }),
+        ],
+      },
     });
 
     console.log('Worker connected, starting...');
@@ -77,6 +110,8 @@ async function run() {
   } catch (err) {
     console.error('Error running worker:', err);
     process.exit(1);
+  } finally {
+    await otelSdk.shutdown();
   }
 }
 

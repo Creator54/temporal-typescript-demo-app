@@ -8,8 +8,12 @@
     "workflow": "ts-node src/client.ts"
   },
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.55.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
     "@temporalio/activity": "^1.8.6",
     "@temporalio/client": "^1.8.6",
+    "@temporalio/interceptors-opentelemetry": "^1.11.6",
     "@temporalio/worker": "^1.8.6",
     "@temporalio/workflow": "^1.8.6",
     "crypto": "^1.0.1"
