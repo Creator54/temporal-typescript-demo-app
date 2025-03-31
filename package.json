@@ -4,8 +4,8 @@
   "description": "Temporal Hello World Demo in TypeScript",
   "scripts": {
     "build": "tsc",
-    "worker": "ts-node src/worker.ts",
-    "workflow": "ts-node src/client.ts"
+    "worker": "ts-node -r ./src/instrumentation.ts src/worker.ts",
+    "workflow": "ts-node -r ./src/instrumentation.ts src/client.ts"
   },
   "dependencies": {
     "@opentelemetry/auto-instrumentations-node": "^0.55.0",
