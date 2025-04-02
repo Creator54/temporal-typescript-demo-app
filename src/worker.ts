@@ -8,6 +8,9 @@ import {
   makeWorkflowExporter,
 } from '@temporalio/interceptors-opentelemetry/lib/worker';
 import { otelSdk, resource, traceExporter } from './instrumentation';
+import { logs } from '@opentelemetry/api-logs';
+
+const logger = logs.getLogger('worker');
 
 function initializeRuntime() {
   Runtime.install({
@@ -41,7 +44,7 @@ async function run() {
     
     // If connecting to Temporal Cloud
     if (process.env.TEMPORAL_HOST_URL) {
-      console.log(`Connecting to Temporal Cloud at ${host} with namespace ${namespace}`);
+      logger.emit({ body: `Connecting to Temporal Cloud at ${host} with namespace ${namespace}` });
       
       // Verify that TLS cert and key are available
       const tlsCert = process.env.TEMPORAL_TLS_CERT;
@@ -71,7 +74,7 @@ async function run() {
       });
     } else {
       // Connect to local Temporal server
-      console.log('Connecting to local Temporal server at localhost:7233');
+      logger.emit({ body: 'Connecting to local Temporal server at localhost:7233' });
       connection = await NativeConnection.connect({
         address: 'localhost:7233'
       });
@@ -97,23 +100,23 @@ async function run() {
       },
     });
 
-    console.log('Worker connected, starting...');
+    logger.emit({ body: 'Worker connected, starting...' });
     
     // Graceful shutdown
     process.once('SIGINT', async () => {
-      console.log('\nGracefully shutting down worker...');
+      logger.emit({ body: 'Gracefully shutting down worker...' });
       await worker?.shutdown();
       process.exit(0);
     });
     process.once('SIGTERM', async () => {
-      console.log('\nGracefully shutting down worker...');
+      logger.emit({ body: 'Gracefully shutting down worker...' });
       await worker?.shutdown();
       process.exit(0);
     });
 
     await worker.run();
   } catch (err) {
-    console.error('Error running worker:', err);
+    logger.emit({ body: `Error running worker: ${err}`, severityText: 'ERROR' });
     process.exit(1);
   } finally {
     await otelSdk.shutdown();

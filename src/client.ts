@@ -4,9 +4,12 @@ import { randomUUID } from 'crypto';
 import { greetUser } from './workflows';
 import * as fs from 'fs';
 import * as path from 'path';
+import { logs } from '@opentelemetry/api-logs';
+
+const logger = logs.getLogger('client');
 
 async function run() {
-  console.log('Creating Temporal client...');
+  logger.emit({ body: 'Creating Temporal client...' });
   
   // Check for Temporal Cloud environment variables
   const host = process.env.TEMPORAL_HOST_URL || 'localhost:7233';
@@ -16,7 +19,7 @@ async function run() {
   
   // If connecting to Temporal Cloud
   if (process.env.TEMPORAL_HOST_URL) {
-    console.log(`Connecting to Temporal Cloud at ${host} with namespace ${namespace}`);
+    logger.emit({ body: `Connecting to Temporal Cloud at ${host} with namespace ${namespace}` });
     
     // Verify that TLS cert and key are available
     const tlsCert = process.env.TEMPORAL_TLS_CERT;
@@ -46,7 +49,7 @@ async function run() {
     });
   } else {
     // Connect to local Temporal server
-    console.log('Connecting to local Temporal server at localhost:7233');
+    logger.emit({ body: 'Connecting to local Temporal server' });
     connection = await Connection.connect();
   }
   
@@ -60,10 +63,10 @@ async function run() {
   });
 
   const workflowId = `hello-world-${randomUUID()}`;
-  console.log('Starting workflow with ID:', workflowId);
+  logger.emit({ body: `Starting workflow with ID: ${workflowId}` });
 
   try {
-    console.log('Executing workflow...');
+    logger.emit({ body: 'Executing workflow...' });
     const result = await client.workflow.execute(greetUser, {
       taskQueue: 'hello-world-task-queue',
       workflowId,
@@ -71,11 +74,10 @@ async function run() {
       workflowExecutionTimeout: '1 minute',
     });
 
-    console.log('Waiting for workflow result...');
-    console.log('Workflow completed successfully!');
-    console.log('Workflow result:', result);
+    logger.emit({ body: 'Workflow completed successfully!' });
+    logger.emit({ body: `Workflow result: ${result}` });
   } catch (err) {
-    console.error('Error running workflow:', err);
+    logger.emit({ body: `Error running workflow: ${err}`, severityText: 'ERROR' });
     process.exit(1);
   } finally {
     await connection.close();

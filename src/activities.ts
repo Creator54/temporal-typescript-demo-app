@@ -6,4 +6,4 @@ export async function sayHello(name: string): Promise<string> {
   const greeting = `Hello ${name}!`;
   log.info('Activity completed', { greeting });
   return greeting;
-} 
+}
