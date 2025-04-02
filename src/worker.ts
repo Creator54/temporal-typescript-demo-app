@@ -14,7 +14,12 @@ function initializeRuntime() {
     telemetryOptions: {
       metrics: {
         otel: {
-          url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://127.0.0.1:4317',
+          // Default OpenTelemetry endpoint for SigNoz cloud
+          // Available regions:
+          // - US: ingest.us.signoz.cloud:443
+          // - EU: ingest.eu.signoz.cloud:443
+          // - IN: ingest.in.signoz.cloud:443
+          url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://ingest.in.signoz.cloud:443',
           metricsExportInterval: '1s'
         }
       },

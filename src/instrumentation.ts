@@ -7,7 +7,12 @@ import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentation
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { Resource } from '@opentelemetry/resources';
 
-const OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://127.0.0.1:4317';
+// Default OpenTelemetry endpoint for SigNoz cloud
+// Available regions:
+// - US: ingest.us.signoz.cloud:443
+// - EU: ingest.eu.signoz.cloud:443
+// - IN: ingest.in.signoz.cloud:443
+const OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://ingest.in.signoz.cloud:443';
 const OTEL_RESOURCE_ATTRIBUTES = process.env.OTEL_RESOURCE_ATTRIBUTES || 'service.name=temporal-hello-world';
 
 function setupTraceExporter(): SpanExporter | undefined {
@@ -16,8 +21,6 @@ function setupTraceExporter(): SpanExporter | undefined {
     url: OTEL_EXPORTER_OTLP_ENDPOINT,
     timeoutMillis: 1000,
   });
-
-  return undefined;
 }
 
 function setupMetricReader() {
