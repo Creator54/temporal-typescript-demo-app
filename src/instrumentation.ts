@@ -6,7 +6,6 @@ import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
 import { SimpleLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { Resource } from '@opentelemetry/resources';
 import { logs } from '@opentelemetry/api-logs';
 import { LoggerProvider } from '@opentelemetry/sdk-logs';
@@ -19,9 +18,25 @@ import { LoggerProvider } from '@opentelemetry/sdk-logs';
 const OTEL_EXPORTER_OTLP_ENDPOINT = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://ingest.in.signoz.cloud:443';
 const OTEL_RESOURCE_ATTRIBUTES = process.env.OTEL_RESOURCE_ATTRIBUTES || 'service.name=temporal-hello-world';
 
-// Set up authentication headers for SigNoz if ingestion key is provided
-const headers = process.env.SIGNOZ_INGESTION_KEY 
-  ? { 'signoz-ingestion-key': process.env.SIGNOZ_INGESTION_KEY }
+function extractKeyValues(str: string, delimiter = ',', keyValueSeparator = '='): { [key: string]: string } {
+  if (!str) return {};
+
+  const result: { [key: string]: string } = {};
+  for (const pair of str.split(delimiter)) {
+    const [key, value] = pair.split(keyValueSeparator);
+    if (key && value) {
+      result[key.trim()] = value.trim();
+    }
+  }
+  return result;
+}
+
+// Extract resource attributes
+const resourceAttributes = extractKeyValues(OTEL_RESOURCE_ATTRIBUTES);
+
+// Parse headers directly from OTEL_EXPORTER_OTLP_HEADERS
+const headers = process.env.OTEL_EXPORTER_OTLP_HEADERS
+  ? extractKeyValues(process.env.OTEL_EXPORTER_OTLP_HEADERS)
   : undefined;
 
 function setupTraceExporter(): SpanExporter | undefined {
@@ -53,9 +68,7 @@ function setupLogExporter() {
   });
 }
 
-export const resource = new Resource({
-  [ATTR_SERVICE_NAME]: OTEL_RESOURCE_ATTRIBUTES.split(',')[0].split('=')[1],
-});
+export const resource = new Resource(resourceAttributes);
 
 export const traceExporter = setupTraceExporter();
 const metricReader = setupMetricReader();

@@ -23,7 +23,7 @@ function initializeRuntime() {
           // - EU: ingest.eu.signoz.cloud:443
           // - IN: ingest.in.signoz.cloud:443
           url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'https://ingest.in.signoz.cloud:443',
-          metricsExportInterval: '1s'
+          metricsExportInterval: '10s'
         }
       },
     },
